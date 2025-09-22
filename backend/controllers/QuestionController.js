@@ -146,3 +146,104 @@ export const getQuestionsByCO = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// Edit a question (only by owner)
+export const editQuestion = async (req, res) => {
+  const { questionId } = req.params;
+  const { content, options } = req.body;
+  const userId = req.user.user_id;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Verify question exists and belongs to user
+    const check = await client.query(
+      "SELECT * FROM questions WHERE question_id = $1",
+      [questionId]
+    );
+    if (check.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Question not found" });
+    }
+    if (check.rows[0].author_id !== userId) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "Not authorized to edit this question" });
+    }
+
+    // Update question text
+    const updated = await client.query(
+      "UPDATE questions SET content = $1, updated_at = NOW() WHERE question_id = $2 RETURNING *",
+      [content, questionId]
+    );
+    const question = updated.rows[0];
+
+    // If MCQ and options are provided → replace options
+    if (question.question_type === "mcq" && Array.isArray(options)) {
+      await client.query("DELETE FROM options WHERE question_id = $1", [questionId]);
+      for (const opt of options) {
+        await client.query(
+          "INSERT INTO options (question_id, option_text, is_correct) VALUES ($1, $2, $3)",
+          [questionId, opt.text, opt.is_correct]
+        );
+      }
+    }
+
+    // Log action
+    await client.query(
+      "INSERT INTO logs (user_id, action, details) VALUES ($1, $2, $3)",
+      [userId, "EDIT_QUESTION", `User ${userId} edited question ${questionId}`]
+    );
+
+    await client.query("COMMIT");
+    res.json({ ...question, options: options || [] });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+// Delete a question (only by owner)
+export const deleteQuestion = async (req, res) => {
+  const { questionId } = req.params;
+  const userId = req.user.user_id;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Verify question exists and belongs to user
+    const check = await client.query(
+      "SELECT * FROM questions WHERE question_id = $1",
+      [questionId]
+    );
+    if (check.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Question not found" });
+    }
+    if (check.rows[0].author_id !== userId) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "Not authorized to delete this question" });
+    }
+
+    // Delete question → cascade deletes options (due to FK ON DELETE CASCADE)
+    await client.query("DELETE FROM questions WHERE question_id = $1", [questionId]);
+
+    // Log action
+    await client.query(
+      "INSERT INTO logs (user_id, action, details) VALUES ($1, $2, $3)",
+      [userId, "DELETE_QUESTION", `User ${userId} deleted question ${questionId}`]
+    );
+
+    await client.query("COMMIT");
+    res.json({ message: "Question deleted successfully" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+

@@ -6,6 +6,8 @@ import authRoutes from "./routes/auth.js";
 import courseRoutes from "./routes/courseRoutes.js";
 import coRoutes from "./routes/coRoutes.js";
 import questionRoutes from "./routes/questionRoutes.js";
+import moderationRoutes from "./routes/moderationRoutes.js";
+
 
 dotenv.config();
 
@@ -18,6 +20,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/cos", coRoutes);
 app.use("/api/questions", questionRoutes);
+app.use("/api/moderation", moderationRoutes);
+
 // Test DB
 app.get("/api/test", async (req, res) => {
   try {

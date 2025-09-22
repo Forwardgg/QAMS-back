@@ -110,3 +110,64 @@ export const getCoursesWithCOs = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// Update a course
+export const updateCourse = async (req, res) => {
+  const { courseId } = req.params;
+  const { code, title, ltp_structure } = req.body;
+  const userId = req.user.user_id;
+
+  try {
+    const result = await pool.query(
+      `UPDATE courses
+       SET code = $1, title = $2, ltp_structure = $3
+       WHERE course_id = $4
+       RETURNING *`,
+      [code, title, ltp_structure, courseId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Course not found" });
+    }
+
+    // Log update
+    await pool.query(
+      "INSERT INTO logs (user_id, action, details) VALUES ($1, $2, $3)",
+      [userId, "UPDATE_COURSE", `Updated course ${courseId}`]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === "23505") {
+      return res.status(400).json({ error: "Course code must be unique" });
+    }
+    res.status(400).json({ error: err.message });
+  }
+};
+
+// Delete a course
+export const deleteCourse = async (req, res) => {
+  const { courseId } = req.params;
+  const userId = req.user.user_id;
+
+  try {
+    const result = await pool.query(
+      "DELETE FROM courses WHERE course_id = $1 RETURNING *",
+      [courseId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Course not found" });
+    }
+
+    // Log delete
+    await pool.query(
+      "INSERT INTO logs (user_id, action, details) VALUES ($1, $2, $3)",
+      [userId, "DELETE_COURSE", `Deleted course ${courseId}`]
+    );
+
+    res.json({ message: "Course deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
