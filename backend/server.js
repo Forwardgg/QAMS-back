@@ -7,7 +7,8 @@ import courseRoutes from "./routes/courseRoutes.js";
 import coRoutes from "./routes/coRoutes.js";
 import questionRoutes from "./routes/questionRoutes.js";
 import moderationRoutes from "./routes/moderationRoutes.js";
-
+import exportRoutes from "./routes/exportRoutes.js";
+import reportRoutes from "./routes/reportRoutes.js";
 
 dotenv.config();
 
@@ -21,6 +22,8 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/cos", coRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/moderation", moderationRoutes);
+app.use("/api/export", exportRoutes);
+app.use("/api/report", reportRoutes);
 
 // Test DB
 app.get("/api/test", async (req, res) => {
