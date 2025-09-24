@@ -1,6 +1,14 @@
+
 import pkg from "pg";
 import dotenv from "dotenv";
-dotenv.config();
+import fs from "fs";
+
+// Prefer .env.local if it exists, else fallback to .env
+if (fs.existsSync('.env.local')) {
+  dotenv.config({ path: '.env.local' });
+} else {
+  dotenv.config();
+}
 
 const { Pool } = pkg;
 

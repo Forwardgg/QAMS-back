@@ -1,0 +1,31 @@
+
+services:
+  db:
+    image: postgres:17
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: qams
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d   # auto-runs qams1.sql on first init
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      - db
+    env_file:
+      - ./backend/.env.docker   # 👈 use Docker-specific env file
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/app          # mount source for live edits
+      - /app/node_modules       # keep container node_modules (prevents host overwrite)
+    command: ["node", "server.js"]
+
+volumes:
+  db_data:
