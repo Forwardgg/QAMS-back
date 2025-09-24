@@ -1,4 +1,5 @@
 .env
 .env.local
+.env.docker
 .env.development
 .env.production

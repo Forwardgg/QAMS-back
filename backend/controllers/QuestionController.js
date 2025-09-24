@@ -148,6 +148,7 @@ export const getQuestionsByCO = async (req, res) => {
 };
 
 // Edit a question (only by owner)
+// Edit a question (with versioning)
 export const editQuestion = async (req, res) => {
   const { questionId } = req.params;
   const { content, options } = req.body;
@@ -157,7 +158,7 @@ export const editQuestion = async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // Verify question exists and belongs to user
+    // Fetch existing question
     const check = await client.query(
       "SELECT * FROM questions WHERE question_id = $1",
       [questionId]
@@ -166,19 +167,38 @@ export const editQuestion = async (req, res) => {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Question not found" });
     }
-    if (check.rows[0].author_id !== userId) {
+    const existing = check.rows[0];
+
+    if (existing.author_id !== userId) {
       await client.query("ROLLBACK");
       return res.status(403).json({ error: "Not authorized to edit this question" });
     }
 
-    // Update question text
+    // Fetch existing options if MCQ
+    let currentOptions = [];
+    if (existing.question_type === "mcq") {
+      const optRes = await client.query(
+        "SELECT option_text, is_correct FROM options WHERE question_id=$1",
+        [questionId]
+      );
+      currentOptions = optRes.rows;
+    }
+
+    // Insert snapshot into question_versions
+    await client.query(
+      `INSERT INTO question_versions (question_id, content, options, edited_by) 
+       VALUES ($1, $2, $3, $4)`,
+      [questionId, existing.content, JSON.stringify(currentOptions), userId]
+    );
+
+    // Update main question
     const updated = await client.query(
       "UPDATE questions SET content = $1, updated_at = NOW() WHERE question_id = $2 RETURNING *",
       [content, questionId]
     );
     const question = updated.rows[0];
 
-    // If MCQ and options are provided → replace options
+    // If MCQ, replace options
     if (question.question_type === "mcq" && Array.isArray(options)) {
       await client.query("DELETE FROM options WHERE question_id = $1", [questionId]);
       for (const opt of options) {
@@ -189,7 +209,7 @@ export const editQuestion = async (req, res) => {
       }
     }
 
-    // Log action
+    // Log
     await client.query(
       "INSERT INTO logs (user_id, action, details) VALUES ($1, $2, $3)",
       [userId, "EDIT_QUESTION", `User ${userId} edited question ${questionId}`]
@@ -202,6 +222,25 @@ export const editQuestion = async (req, res) => {
     res.status(400).json({ error: err.message });
   } finally {
     client.release();
+  }
+};
+
+// Get version history of a question
+export const getQuestionVersions = async (req, res) => {
+  const { questionId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT v.*, u.name as edited_by_name
+       FROM question_versions v
+       LEFT JOIN users u ON v.edited_by = u.user_id
+       WHERE v.question_id = $1
+       ORDER BY v.created_at DESC`,
+      [questionId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 

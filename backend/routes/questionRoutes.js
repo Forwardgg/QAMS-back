@@ -1,3 +1,4 @@
+// questionRoutes.js
 import express from "express";
 import { 
   addSubjective, 
@@ -5,7 +6,8 @@ import {
   getQuestionsByCourse, 
   getQuestionsByCO, 
   editQuestion, 
-  deleteQuestion 
+  deleteQuestion,
+  getQuestionVersions 
 } from "../controllers/QuestionController.js";
 import { authenticate, authorizeRoles } from "../middleware/auth.js";
 
@@ -22,5 +24,6 @@ router.delete("/:questionId", authenticate, deleteQuestion);
 // Any logged-in user can fetch questions of a course
 router.get("/course/:courseId", authenticate, getQuestionsByCourse);
 router.get("/co/:coId", authenticate, getQuestionsByCO);
+router.get("/:questionId/versions", authenticate, getQuestionVersions);
 
 export default router;
