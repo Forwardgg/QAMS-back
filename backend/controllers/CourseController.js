@@ -1,173 +1,154 @@
-// CourseController.js
-import { pool } from "../config/db.js";
-
-// Helper: generate assessments from L-T-P structure
-const generateAssessments = (ltp) => {
-  const [l, t, p] = ltp.split("-").map(Number);
-  let assessments = [];
-
-  if (l > 0 || t > 0) {
-    assessments.push("Sessional Test-I", "Mid-term Test", "Sessional Test-II", "End-term Test");
-  }
-  if (p > 0 && (l > 0 || t > 0)) {
-    assessments.push("End-term Laboratory Test");
-  }
-  if (l === 0 && t === 0 && p > 0) {
-    assessments.push("Mid-term Laboratory Test", "End-term Laboratory Test");
-  }
-  if (l === 0 && t > 0 && p > 0) {
-    assessments.push("End-term Laboratory Test");
-  }
-
-  return assessments;
-};
+import { Course } from "../models/Course.js";
+import { Log } from "../models/Log.js"; // ✅ add this import
 
 export const createCourse = async (req, res) => {
-  const { code, title, ltp_structure } = req.body;
-  const userId = req.user.user_id;
-
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
+    const { code, title, l, t, p } = req.body;
+    const createdBy = req.user.user_id;
 
-    // Insert into courses
-    const courseResult = await client.query(
-      "INSERT INTO courses (code, title, ltp_structure, created_by) VALUES ($1, $2, $3, $4) RETURNING *",
-      [code, title, ltp_structure, userId]
-    );
-    const course = courseResult.rows[0];
+    // Validate LTP
+    if (![l, t, p].every((n) => Number.isInteger(n) && n >= 0)) {
+      return res.status(400).json({ success: false, message: "Invalid L-T-P values" });
+    }
 
-    // Generate assessments based on LTP
-    const assessments = generateAssessments(ltp_structure);
+    const course = await Course.create({ code, title, l, t, p, createdBy });
 
-    // Insert into logs
-    await client.query(
-      "INSERT INTO logs (user_id, action, details) VALUES ($1, $2, $3)",
-      [userId, "ADD_COURSE", `${req.user.role} ${req.user.user_id} created course ${course.code}`]
-    );
-
-    await client.query("COMMIT");
-
-    // Respond with course + assessments
-    res.status(201).json({ ...course, assessments });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    res.status(400).json({ error: err.message });
-  } finally {
-    client.release();
-  }
-};
-
-export const getCourses = async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT c.*, u.name as creator_name FROM courses c LEFT JOIN users u ON c.created_by = u.user_id"
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// New: Fetch courses + COs + auto-assessments
-export const getCoursesWithCOs = async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT c.course_id, c.code, c.title, c.ltp_structure, c.created_at, u.name as creator_name,
-              co.co_id, co.co_number, co.description
-       FROM courses c
-       LEFT JOIN users u ON c.created_by = u.user_id
-       LEFT JOIN course_outcomes co ON c.course_id = co.course_id
-       ORDER BY c.course_id, co.co_number`
-    );
-
-    // Group by course
-    const coursesMap = {};
-    result.rows.forEach(row => {
-      if (!coursesMap[row.course_id]) {
-        coursesMap[row.course_id] = {
-          course_id: row.course_id,
-          code: row.code,
-          title: row.title,
-          ltp_structure: row.ltp_structure,
-          created_at: row.created_at,
-          creator_name: row.creator_name,
-          assessments: generateAssessments(row.ltp_structure),
-          outcomes: []
-        };
-      }
-      if (row.co_id) {
-        coursesMap[row.course_id].outcomes.push({
-          co_id: row.co_id,
-          co_number: row.co_number,
-          description: row.description
-        });
-      }
+    // Log action
+    await Log.create({
+      userId: createdBy,
+      action: "CREATE_COURSE",
+      details: `Created course ${course.code} - ${course.title}`,
     });
 
-    res.json(Object.values(coursesMap));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(201).json({ success: true, data: course });
+  } catch (error) {
+    if (error.code === "23505") {
+      return res.status(409).json({ success: false, message: "Course code already exists" });
+    }
+    console.error("Error creating course:", error);
+    res.status(500).json({ success: false, message: "Failed to create course" });
   }
 };
-
-// Update a course
+// Admin → get all courses
+export const getAllCoursesAdmin = async (req, res) => {
+  try {
+    const courses = await Course.getAll();
+    res.json({ success: true, total: courses.length, data: courses });
+  } catch (error) {
+    console.error("Error fetching courses:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch courses" });
+  }
+};
+// Instructor → get only their own courses
+export const getAllCoursesInstructor = async (req, res) => {
+  try {
+    const instructorId = req.user.user_id;
+    const courses = await Course.getByCreator(instructorId);
+    res.json({ success: true, total: courses.length, data: courses });
+  } catch (error) {
+    console.error("Error fetching instructor courses:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch instructor courses" });
+  }
+};
+// Everyone → public list
+export const getCoursesPublic = async (req, res) => {
+  try {
+    // Ideally use a Course.getPublic() query
+    const courses = await Course.getAll();
+    const publicCourses = courses.map((c) => ({
+      code: c.code,
+      title: c.title,
+      l: c.l,
+      t: c.t,
+      p: c.p,
+    }));
+    res.json({ success: true, data: publicCourses });
+  } catch (error) {
+    console.error("Error fetching public courses:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch courses" });
+  }
+};
+// Update course
 export const updateCourse = async (req, res) => {
-  const { courseId } = req.params;
-  const { code, title, ltp_structure } = req.body;
-  const userId = req.user.user_id;
-
   try {
-    const result = await pool.query(
-      `UPDATE courses
-       SET code = $1, title = $2, ltp_structure = $3
-       WHERE course_id = $4
-       RETURNING *`,
-      [code, title, ltp_structure, courseId]
-    );
+    const { id } = req.params;
+    const { code, title, l, t, p } = req.body;
+    const user = req.user;
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Course not found" });
+    const course = await Course.getById(id);
+    if (!course) return res.status(404).json({ success: false, message: "Course not found" });
+
+    if (user.role === "instructor" && course.created_by !== user.user_id) {
+      return res.status(403).json({ success: false, message: "Not authorized" });
     }
 
-    // Log update
-    await pool.query(
-      "INSERT INTO logs (user_id, action, details) VALUES ($1, $2, $3)",
-      [userId, "UPDATE_COURSE", `Updated course ${courseId}`]
-    );
+    const updated = await Course.update(id, { code, title, l, t, p });
+    if (!updated) return res.status(404).json({ success: false, message: "Course not found" });
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    if (err.code === "23505") {
-      return res.status(400).json({ error: "Course code must be unique" });
-    }
-    res.status(400).json({ error: err.message });
+    await Log.create({
+      userId: user.user_id,
+      action: "UPDATE_COURSE",
+      details: `Updated course ${updated.code} - ${updated.title}`,
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error("Error updating course:", error);
+    res.status(500).json({ success: false, message: "Failed to update course" });
   }
 };
-
-// Delete a course
+// Delete course
 export const deleteCourse = async (req, res) => {
-  const { courseId } = req.params;
-  const userId = req.user.user_id;
-
   try {
-    const result = await pool.query(
-      "DELETE FROM courses WHERE course_id = $1 RETURNING *",
-      [courseId]
-    );
+    const { id } = req.params;
+    const user = req.user;
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Course not found" });
+    const course = await Course.getById(id);
+    if (!course) return res.status(404).json({ success: false, message: "Course not found" });
+
+    if (user.role === "instructor" && course.created_by !== user.user_id) {
+      return res.status(403).json({ success: false, message: "Not authorized" });
     }
 
-    // Log delete
-    await pool.query(
-      "INSERT INTO logs (user_id, action, details) VALUES ($1, $2, $3)",
-      [userId, "DELETE_COURSE", `Deleted course ${courseId}`]
-    );
+    const deleted = await Course.delete(id);
+    if (!deleted) return res.status(404).json({ success: false, message: "Course not found" });
 
-    res.json({ message: "Course deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    await Log.create({
+      userId: user.user_id,
+      action: "DELETE_COURSE",
+      details: `Deleted course ${deleted.code} - ${deleted.title}`,
+    });
+
+    res.json({ success: true, data: deleted, message: `Deleted course ${deleted.code}` });
+  } catch (error) {
+    console.error("Error deleting course:", error);
+    res.status(500).json({ success: false, message: "Failed to delete course" });
+  }
+};
+// Get by code
+export const getCourseByCode = async (req, res) => {
+  try {
+    const { code } = req.params;
+    const course = await Course.getByCode(code);
+    if (!course) return res.status(404).json({ success: false, message: "Course not found" });
+    res.json({ success: true, data: course });
+  } catch (error) {
+    console.error("Error fetching course by code:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch course" });
+  }
+};
+// Search by title
+export const searchCoursesByTitle = async (req, res) => {
+  try {
+    const { title } = req.query;
+    if (!title) {
+      return res.status(400).json({ success: false, message: "Title query is required" });
+    }
+
+    const courses = await Course.searchByTitle(title);
+    res.json({ success: true, total: courses.length, data: courses });
+  } catch (error) {
+    console.error("Error searching courses by title:", error);
+    res.status(500).json({ success: false, message: "Failed to search courses" });
   }
 };

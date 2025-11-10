@@ -1,4 +1,5 @@
 export default {
   testEnvironment: "node",
-  transform: {}, // no Babel, just pure ESM
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.js"],
+  transform: {}
 };

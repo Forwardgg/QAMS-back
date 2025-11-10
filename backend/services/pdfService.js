@@ -31,7 +31,7 @@ export async function buildCoursePDF(course, questions, meta = {}) {
     y -= 15;
   }
 
-  // 📌 Questions
+  //Questions
   write("Questions:", { fontType: bold, size: 14 });
   let qNo = 1;
   for (const q of questions) {
@@ -48,7 +48,7 @@ export async function buildCoursePDF(course, questions, meta = {}) {
     y -= 5;
   }
 
-  // 📌 Footer (fixed position, not in write-loop)
+  //Footer (fixed position, not in write-loop)
   page.drawText("Tezpur University – Question Paper", {
     x: 200,
     y: 30,

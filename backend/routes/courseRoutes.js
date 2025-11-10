@@ -1,23 +1,41 @@
-// courseRoutes.js
 import express from "express";
-import { createCourse, getCourses, getCoursesWithCOs, updateCourse, deleteCourse } from "../controllers/CourseController.js";
+import {
+  createCourse,
+  getAllCoursesAdmin,
+  getAllCoursesInstructor,
+  getCoursesPublic,
+  updateCourse,
+  deleteCourse,
+  getCourseByCode,
+  searchCoursesByTitle
+} from "../controllers/CourseController.js";
+
 import { authenticate, authorizeRoles } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Only admin + instructor can create courses
+// Create course (admin or instructor)
 router.post("/", authenticate, authorizeRoles("admin", "instructor"), createCourse);
 
-// Any logged-in user can view courses
-router.get("/", authenticate, getCourses);
+// Admin → get all courses
+router.get("/", authenticate, authorizeRoles("admin"), getAllCoursesAdmin);
 
-// Any logged-in user can view courses with COs + assessments
-router.get("/with-cos", authenticate, getCoursesWithCOs);
+// Instructor → get own courses
+router.get("/mine", authenticate, authorizeRoles("instructor"), getAllCoursesInstructor);
 
-// Only admin + instructor can update a course
-router.put("/:courseId", authenticate, authorizeRoles("admin", "instructor"), updateCourse);
+// Public → everyone can see course code, title, LTP
+router.get("/public", getCoursesPublic);
 
-// Only admin + instructor can delete a course
-router.delete("/:courseId", authenticate, authorizeRoles("admin", "instructor"), deleteCourse);
+// Get course by code (public)
+router.get("/code/:code", getCourseByCode);
+
+// Search courses (public) - by title
+router.get("/search", searchCoursesByTitle);
+
+// Update course (admin can update all, instructor only own)
+router.put("/:id", authenticate, authorizeRoles("admin", "instructor"), updateCourse);
+
+// Delete course (admin can delete all, instructor only own)
+router.delete("/:id", authenticate, authorizeRoles("admin", "instructor"), deleteCourse);
 
 export default router;

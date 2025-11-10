@@ -1,135 +1,210 @@
+// tests/question.test.js
 import request from "supertest";
 import app from "../server.js";
-import { pool } from "../config/db.js";
+
+let adminToken;
+let instructorToken;
+let courseId;
+let coId;
+let mcqId;
+let subjectiveId;
+let paperId;
+
+beforeAll(async () => {
+  // Login seeded admin
+  const adminRes = await request(app)
+    .post("/api/auth/login")
+    .send({ email: "admin@example.com", password: "adminpassword" });
+  adminToken = adminRes.body.token;
+
+  // Login seeded instructor
+  const instructorRes = await request(app)
+    .post("/api/auth/login")
+    .send({ email: "seed_instructor@example.com", password: "instructorpassword" });
+  instructorToken = instructorRes.body.token;
+
+  // Instructor creates a course
+  const courseRes = await request(app)
+    .post("/api/courses")
+    .set("Authorization", `Bearer ${instructorToken}`)
+    .send({ code: "Q101", title: "Question Testing", l: 3, t: 1, p: 0 });
+  courseId = courseRes.body.data.course_id;
+
+  // Add a CO for the course
+  const coRes = await request(app)
+    .post(`/api/cos/course/${courseId}`)
+    .set("Authorization", `Bearer ${instructorToken}`)
+    .send({ coNumber: "CO1", description: "Test Outcome" });
+  coId = coRes.body.data.co_id;
+});
 
 describe("Question API", () => {
-  let token;
-  let courseId;
-  let coId;
-  let createdQuestionId;
-
-  beforeAll(async () => {
-    // login as instructor/admin
+  // CREATE
+  it("should add a subjective question with media", async () => {
     const res = await request(app)
-      .post("/api/auth/login")
+      .post(`/api/questions/subjective/${courseId}`)
+      .set("Authorization", `Bearer ${instructorToken}`)
       .send({
-        email: "jestinstructor_1758715660170@example.com",
-        password: "password123"
+        content: "Explain database normalization.",
+        coId,
+        media: [{ mediaUrl: "https://dummyimage.com/test.png", caption: "Diagram" }],
       });
-    token = res.body.token;
-
-    // create a course
-    const courseRes = await request(app)
-      .post("/api/courses")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
-        code: `TEST${Math.floor(Math.random() * 10000)}`,
-        title: "Test Course for Questions",
-        ltp_structure: "3-0-0"
-      });
-    courseId = courseRes.body.course_id;
-    if (!courseId) throw new Error("Failed to create test course");
-
-    // create a CO for the course
-    const coRes = await request(app)
-      .post(`/api/cos/${courseId}`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({
-        co_number: `CO${Math.floor(Math.random() * 10000)}`,
-        description: "Test CO for Questions"
-      });
-    coId = coRes.body.co_id;
-    if (!coId) throw new Error("Failed to create test CO");
-  });
-
-  afterAll(async () => {
-    await pool.end();
-  });
-
-  it("should add a subjective question", async () => {
-    const res = await request(app)
-      .post("/api/questions/subjective")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
-        course_id: courseId,
-        co_id: coId,
-        content: "Explain recursion with an example."
-      });
-
-    console.log("ADD SUBJECTIVE RESPONSE:", res.statusCode, res.body);
 
     expect(res.statusCode).toBe(201);
-    expect(res.body).toHaveProperty("question_id");
-    createdQuestionId = res.body.question_id;
+    subjectiveId = res.body.data.question_id;
+    expect(res.body.data.media.length).toBe(1);
   });
 
-  it("should add an MCQ question", async () => {
+  it("should reject empty subjective question", async () => {
     const res = await request(app)
-      .post("/api/questions/mcq")
-      .set("Authorization", `Bearer ${token}`)
+      .post(`/api/questions/subjective/${courseId}`)
+      .set("Authorization", `Bearer ${instructorToken}`)
+      .send({ content: "   ", coId });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("should add an MCQ with options and media", async () => {
+    const res = await request(app)
+      .post(`/api/questions/mcq/${courseId}`)
+      .set("Authorization", `Bearer ${instructorToken}`)
       .send({
-        course_id: courseId,
-        co_id: coId,
-        content: "Which of the following is a stack operation?",
+        content: "Which of these is a DBMS?",
+        coId,
         options: [
-          { text: "enqueue", is_correct: false },
-          { text: "dequeue", is_correct: false },
-          { text: "push", is_correct: true },
-          { text: "peek", is_correct: true }
-        ]
+          { optionText: "Oracle", isCorrect: true },
+          { optionText: "Excel", isCorrect: false },
+        ],
+        media: [{ mediaUrl: "https://dummyimage.com/db.png", caption: "DBMS Logo" }],
       });
-
-    console.log("ADD MCQ RESPONSE:", res.statusCode, res.body);
 
     expect(res.statusCode).toBe(201);
-    expect(res.body).toHaveProperty("question_id");
-    expect(res.body.options.length).toBeGreaterThan(0);
+    mcqId = res.body.data.question_id;
+    expect(res.body.data.options.length).toBe(2);
+    expect(res.body.data.media.length).toBe(1);
   });
 
-  it("should fetch questions by course", async () => {
+  it("should reject MCQ with fewer than 2 options", async () => {
     const res = await request(app)
-      .get(`/api/questions/course/${courseId}`)
-      .set("Authorization", `Bearer ${token}`);
-
-    console.log("GET BY COURSE RESPONSE:", res.statusCode, res.body);
-
-    expect(res.statusCode).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-
-  it("should fetch questions by CO", async () => {
-    const res = await request(app)
-      .get(`/api/questions/co/${coId}`)
-      .set("Authorization", `Bearer ${token}`);
-
-    console.log("GET BY CO RESPONSE:", res.statusCode, res.body);
-
-    expect(res.statusCode).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-  });
-
-  it("should edit a question (owner only)", async () => {
-    const res = await request(app)
-      .put(`/api/questions/${createdQuestionId}`)
-      .set("Authorization", `Bearer ${token}`)
+      .post(`/api/questions/mcq/${courseId}`)
+      .set("Authorization", `Bearer ${instructorToken}`)
       .send({
-        content: "Explain recursion with an example in C++."
+        content: "Invalid MCQ?",
+        coId,
+        options: [{ optionText: "Only one", isCorrect: true }],
+      });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("should reject MCQ with no correct option", async () => {
+    const res = await request(app)
+      .post(`/api/questions/mcq/${courseId}`)
+      .set("Authorization", `Bearer ${instructorToken}`)
+      .send({
+        content: "Invalid MCQ 2?",
+        coId,
+        options: [
+          { optionText: "Wrong1", isCorrect: false },
+          { optionText: "Wrong2", isCorrect: false },
+        ],
+      });
+    expect(res.statusCode).toBe(400);
+  });
+
+  // READ
+  it("should fetch all questions for a course", async () => {
+    const res = await request(app)
+      .get(`/api/questions/course/${courseId}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.total).toBeGreaterThanOrEqual(2);
+    expect(res.body.data.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // PAPER SETUP
+  it("should create a question paper and attach questions", async () => {
+    const paperRes = await request(app)
+      .post("/api/papers")
+      .set("Authorization", `Bearer ${instructorToken}`)
+      .send({
+        courseId,
+        title: "Midterm Test Paper",
+        examType: "Midterm",
+        semester: "5",
+        academicYear: "2025-26",
+        fullMarks: 50,
+        duration: "2 hrs",
       });
 
-    console.log("EDIT QUESTION RESPONSE:", res.statusCode, res.body);
+    expect(paperRes.statusCode).toBe(201);
+    paperId = paperRes.body.data.paper_id;
 
-    expect(res.statusCode).toBe(200);
-    expect(res.body.content).toContain("recursion");
+    const pq1 = await request(app)
+      .post(`/api/paper-questions/${paperId}/${subjectiveId}`)
+      .set("Authorization", `Bearer ${instructorToken}`)
+      .send({ sequence: 1, marks: 5, section: "A" });
+    expect(pq1.statusCode).toBe(201);
+
+    const pq2 = await request(app)
+      .post(`/api/paper-questions/${paperId}/${mcqId}`)
+      .set("Authorization", `Bearer ${instructorToken}`)
+      .send({ sequence: 2, marks: 5, section: "A" });
+    expect(pq2.statusCode).toBe(201);
   });
 
-  it("should delete a question (owner only)", async () => {
-    const res = await request(app)
-      .delete(`/api/questions/${createdQuestionId}`)
-      .set("Authorization", `Bearer ${token}`);
+  it("should fetch questions by paper", async () => {
+    const res = await request(app).get(`/api/questions/paper/${paperId}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.total).toBe(2);
+    expect(res.body.data.length).toBe(2);
+  });
 
-    console.log("DELETE QUESTION RESPONSE:", res.statusCode, res.body);
+  it("should fetch questions for course + paper", async () => {
+    const res = await request(app).get(`/api/questions/course/${courseId}/paper/${paperId}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.total).toBe(2);
+    expect(res.body.data.every(q => q.course_id === courseId)).toBe(true);
+  });
+
+  // UPDATE
+  it("should update an existing MCQ", async () => {
+    const res = await request(app)
+      .put(`/api/questions/${mcqId}`)
+      .set("Authorization", `Bearer ${instructorToken}`)
+      .send({
+        content: "Which of these is a relational DBMS?",
+        coId,
+        options: [
+          { optionText: "Oracle", isCorrect: true },
+          { optionText: "MongoDB", isCorrect: false },
+          { optionText: "PostgreSQL", isCorrect: true },
+        ],
+        media: [],
+      });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toHaveProperty("message");
+    expect(res.body.data.options.length).toBe(3);
+  });
+
+  it("updating non-existent question should 404", async () => {
+    const res = await request(app)
+      .put("/api/questions/99999")
+      .set("Authorization", `Bearer ${instructorToken}`)
+      .send({ content: "Ghost question", coId });
+    expect(res.statusCode).toBe(404);
+  });
+
+  // DELETE
+  it("should delete a question (soft delete + cleanup)", async () => {
+    const res = await request(app)
+      .delete(`/api/questions/${subjectiveId}`)
+      .set("Authorization", `Bearer ${instructorToken}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toMatch(/deleted/i);
+  });
+
+  it("deleting non-existent question should 404", async () => {
+    const res = await request(app)
+      .delete("/api/questions/99999")
+      .set("Authorization", `Bearer ${instructorToken}`);
+    expect(res.statusCode).toBe(404);
   });
 });
