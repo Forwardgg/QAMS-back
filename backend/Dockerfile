@@ -1,17 +1,21 @@
-FROM node:22-alpine
+FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package manifest(s) first for better caching
+# Copy package files
 COPY package*.json ./
 
-# Install production dependencies (faster & smaller)
-RUN npm install --production
+# Install dependencies
+RUN npm install
 
-# Copy remaining source
+# Copy source code
 COPY . .
 
+# Create uploads directory if it doesn't exist
+RUN mkdir -p uploads
+
+# Expose port
 EXPOSE 5000
 
-# Run the server (ensure package.json has a start script or server.js exists)
-CMD ["node", "server.js"]
+# Start the application
+CMD ["npm", "start"]

@@ -2,6 +2,8 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import { pool } from "./config/db.js";
+import fs from "fs";
+import path from "path";
 
 // Routers
 import authRoutes from "./routes/authRoutes.js";
@@ -21,61 +23,30 @@ dotenv.config();
 
 const app = express();
 
-// CORS configuration
-app.use(cors({
-  origin: "*", // Allow all origins for now
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
+// ------------------- CORS Configuration -------------------
+const corsOptions = {
+  origin: [
+    'http://localhost:3000', 
+    'http://frontend:3000', // For Docker container communication
+    process.env.FRONTEND_URL // If you set this environment variable
+  ].filter(Boolean), // Remove any undefined values
+  credentials: true,
+};
 
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// Root route - improved
-app.get("/", (req, res) => {
-  res.json({ 
-    message: "QAMS Backend API is running! 🚀", 
-    version: "1.0.0",
-    status: "active",
-    timestamp: new Date().toISOString(),
-    endpoints: [
-      "/health",
-      "/api/test", 
-      "/api/auth",
-      "/api/users",
-      "/api/courses",
-      "/api/questions"
-    ]
-  });
-});
-
-// Health check route
-app.get("/health", (req, res) => {
-  res.status(200).json({ 
-    status: "OK", 
-    message: "Server is running smoothly",
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// DB test route
-app.get("/api/test", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT NOW()");
-    res.json({ 
-      success: true,
-      database: "Connected ✅",
-      time: result.rows[0].now 
-    });
-  } catch (err) {
-    console.error("Database connection error:", err);
-    res.status(500).json({ 
-      success: false,
-      error: "Database connection failed",
-      message: err.message 
-    });
+// ------------------- Ensure Uploads Directory Exists -------------------
+const ensureUploadsDir = () => {
+  const uploadsDir = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('✅ Uploads directory created');
   }
-});
+};
+
+// Create uploads directory on startup
+ensureUploadsDir();
 
 // ------------------- API ROUTES -------------------
 app.use("/api/auth", authRoutes);
@@ -91,38 +62,52 @@ app.use("/api/logs", logRoutes);
 // app.use("/api/export", exportRoutes);
 // app.use("/api/report", reportRoutes);
 
-// 404 handler for undefined routes
-app.use("*", (req, res) => {
-  res.status(404).json({
-    error: "Route not found",
-    path: req.originalUrl,
-    availableEndpoints: [
-      "GET /",
-      "GET /health", 
-      "GET /api/test",
-      "POST /api/auth/login",
-      "GET /api/users",
-      "GET /api/courses"
-    ]
+// ------------------- Health Check Endpoint -------------------
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ 
+    status: "OK", 
+    message: "Server is running",
+    timestamp: new Date().toISOString()
   });
 });
 
-// Error handling middleware
+// DB test
+app.get("/api/test", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT NOW()");
+    res.json({ time: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------- Error Handling Middleware -------------------
 app.use((err, req, res, next) => {
-  console.error("Server error:", err);
-  res.status(500).json({
-    error: "Internal server error",
-    message: err.message
+  console.error('Error:', err.stack);
+  res.status(500).json({ 
+    error: 'Something went wrong!',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
   });
 });
 
-// Server start
+// ------------------- 404 Handler -------------------
+app.use((req, res) => {
+  res.status(404).json({ 
+    error: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
+});
+
+// ------------------- Server Start -------------------
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-});
+if (process.env.NODE_ENV !== "test") {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`📁 Uploads directory: ${path.join(process.cwd(), 'uploads')}`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
 
 export default app;
