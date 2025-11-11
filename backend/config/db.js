@@ -31,20 +31,29 @@ if (process.env.NODE_ENV === "test") {
   ssl = false;
   console.log('[db] Test environment - SSL disabled for local DB');
 } else {
-  // For production/staging, use SSL with Aiven
-  const caPath = process.env.PGSSLROOTCERT
-    ? path.resolve(process.env.PGSSLROOTCERT)
-    : path.resolve("certs/ca.pem");
+  // For production on Render - simplified SSL handling
+  if (process.env.PGSSLMODE === 'require' || process.env.PGSSLMODE === 'verify-full') {
+    // Try to use CA certificate if available
+    const caPath = process.env.PGSSLROOTCERT
+      ? path.resolve(process.env.PGSSLROOTCERT)
+      : path.resolve("certs/ca.pem");
 
-  if (fs.existsSync(caPath)) {
-    ssl = {
-      ca: fs.readFileSync(caPath, "utf8"),
-      rejectUnauthorized: true,
-    };
-    console.log(`[db] Using CA file: ${caPath}`);
+    if (fs.existsSync(caPath)) {
+      ssl = {
+        ca: fs.readFileSync(caPath, "utf8"),
+        rejectUnauthorized: true,
+      };
+      console.log(`[db] Using CA file: ${caPath}`);
+    } else {
+      // For Render deployment - use SSL without custom CA
+      ssl = { 
+        rejectUnauthorized: false 
+      };
+      console.log('[db] Render environment - Using SSL with rejectUnauthorized: false');
+    }
   } else {
-    console.warn(`[db] ⚠️ CA file not found at ${caPath}. Falling back to insecure SSL.`);
-    ssl = { require: true, rejectUnauthorized: false };
+    ssl = false;
+    console.log('[db] SSL disabled via PGSSLMODE setting');
   }
 }
 
