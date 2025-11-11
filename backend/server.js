@@ -62,6 +62,15 @@ app.use("/api/logs", logRoutes);
 // app.use("/api/export", exportRoutes);
 // app.use("/api/report", reportRoutes);
 
+// ------------------- ROOT ROUTE FOR RENDER HEALTH CHECKS -------------------
+app.get("/", (req, res) => {
+  res.status(200).json({ 
+    status: "OK", 
+    message: "QAMS API Server is running",
+    timestamp: new Date().toISOString()
+  });
+});
+
 // ------------------- Health Check Endpoint -------------------
 app.get("/api/health", (req, res) => {
   res.status(200).json({ 
